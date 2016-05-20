@@ -1,0 +1,600 @@
+---
+title: "Extraccion de datos catastrales a cartografia con R"
+author: "Antonio Ripoll"
+date: "Miercoles, 09 de diciembre de 2015"
+output:
+  pdf_document: default
+---
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+## Extraccion de datos catastrales de ficheros .CAT 
+#####Analisis de 13 , 14 y 15 para determinar el numero de viviendas.
+#####Creacion de base de datos a partir de .CAT
+
+Carga de librerias y eleccion del directorio de trababajo en el que han de estar los siguientes ficheros:
+
+A. Fichero descargado de <http://www.sedecatastro.gob.es/> :
+
++  43_155_U_2015-09-25.CAT
+
+B.  Ficheros de estructura del registro de datos alfanumericos publicos de la D.G. del Catastro (facilitados por ComunData a peticion):
+
++  estructura11v.csv
++  estructura13v.csv
++  estructura14v.csv
++  estructura15v.csv
+
+## Carga de librerias
+Es necesario cargar las librerias `reshape` i `dplyr` de <https://cran.r-project.org/web/packages/dplyr/>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Directorio de trabajo
+setwd("C:/Users/Antonio/Google Drive/INFORMACION")
+setwd("C:/DADES/DadesObertes/TORREDEMBARRA/2016/43_155_U_2016-01-22.CAT")
+#Librerias
+library(rmarkdown)
+library(reshape)
+library(dplyr)
+library(RPostgreSQL)
+library(sp)
+library(maptools)
+library(rgeos)
+```
+
+## CARGA FICHERO .CAT
+Creacion de los ficheros desagregados para cada tipo de registro:
+
+43_155_registros11.txt        parcela catastral
+43_155_registros14.txt        unidad catastral (finca)
+
+```{r}
+fichero="43_155_U_2016-01-22.CAT"        # Torredembarra
+muni="43_155_"
+cat<-readLines(fichero)
+tipos<-c(11,13,14,15)
+for (n in tipos) {
+        print(n)
+        registrosnn=subset(cat,substr(cat,1,2)==n)
+        if (n==14 | n==15 | n==13){
+                registrosnn<-gsub("#","Z",registrosnn)
+        }
+        grava=writeLines(registrosnn,paste0(muni,"registros",n,".txt"))
+}
+```
+
+### Creacion de ficheros .CSV con nombres de campos para trabajar.
+
+```{r}
+tiposnew<-c(paste0(muni,"registros11"),paste0(muni,"registros13"),paste0(muni,"registros14"),paste0(muni,"registros15")) 
+for (k in tiposnew){
+        print(k)
+        n<-substr(k,17,18)      # 11,13,14 o 15 para Tarragona "43_900_"        
+#         para Granollers Busca los caracteres del numero de registro en el nombre
+#         n<-substr(k,16,17)      
+        nombres<-read.csv(paste0("estructura",n,"v.csv"), sep=";",header=FALSE)
+        leo<-paste0(k,".txt")
+        leido<-read.fwf(leo, nombres$V2, col.names=nombres$V1,skipNul = TRUE)
+        write.csv(leido,paste0(muni,"registros",n,".csv"))
+}
+```
+
+### Carga los ficheros .CSV
+
+```{r}
+cat11<-read.csv(paste0(muni,"registros11.csv"), na.strings = 0,stringsAsFactors=FALSE)
+cat13<-read.csv(paste0(muni,"registros13.csv"), na.strings = 0,stringsAsFactors=FALSE)
+cat14<-read.csv(paste0(muni,"registros14.csv"), na.strings = 0,stringsAsFactors=FALSE)
+cat15<-read.csv(paste0(muni,"registros15.csv"), na.strings = 0,stringsAsFactors=FALSE)
+summary(cat14)
+```
+
+## Trabajar con las tablas y crea base de datos
+###Abre la conexion a la base de datos
+```{r}
+library(RPostgreSQL)
+# Open local postgres connection
+con1 <- dbConnect(PostgreSQL(), host="localhost", user= "postgres", password="pasipasi", dbname="postgres")
+# Close PostgreSQL connection 
+dbDisconnect(con1)
+
+# Conexion a a servidor
+con <- dbConnect(PostgreSQL(), host="comundata.com", user= "postgres", password="pasipasi", dbname="opendata")
+```
+
+### Crea las tablas en la base de datos en la conexion seleccionada anteriormente
+Ejecutar una sola vez
+```{r}
+# dbWriteTable(con, "cat11", cat11)
+# dbWriteTable(con, "cat13", cat13)
+# dbWriteTable(con, "cat14", cat14)
+# dbWriteTable(con, "cat15", cat15)
+```
+
+### Consulta las tablas
+
+```{r}
+dbListTables(con)
+dbListFields(con, "cargos_43_155")
+dbListFields(con, "PARCELA")
+parcela <- dbGetQuery(con, "SELECT * FROM cargos_43_155")
+str(parcela)
+parcela <- dbGetQuery(con,"SELECT 
+  cat11.parcat,
+  substring(cat11.parcat from 1 for 7) AS masa,
+  cat11.suppar, 
+  cat11.supcons, 
+  cat11.supsobre, 
+  cat14.superficie, 
+  cat14.tipologia, 
+  cat14.antiguedad
+FROM 
+  public.cat11, 
+  public.cat14
+WHERE 
+  cat11.parcat = cat14.parcat")
+```
+
+## OPERACIONES DE CLUSTER
+
+```{r}
+library(caret)
+parcela <- dbGetQuery(con, "SELECT * FROM cargos_43_155")
+str(parcela)
+parcel=as.data.frame(parcela["supcons"])
+parcel$supcons=as.double(parcel$supcons)
+parcel$suppar=as.double(parcela$suppar)
+parcel$antiguedad=as.double(parcela$antiguedad)
+parcel$cx=as.double(parcela$cx/100)
+parcel$cy=as.double(parcela$cy)/100
+str(parcel)
+summary(parcel)
+parcel=na.omit(parcel)
+miparcel<-scale(parcel)
+
+# Determine number of clusters
+wss <- (nrow(parcel)-1)*sum(apply(parcel,2,var))
+for (i in 2:15) wss[i] <- sum(kmeans(parcel,
+   centers=i)$withinss)
+plot(1:15, wss, type="b", xlab="Number of Clusters",
+  ylab="Within groups sum of squares") 
+
+# K-Means Cluster Analysis
+fit <- kmeans(parcel, 7) # 5 cluster solution
+# get cluster means
+aggregate(parcel,by=list(fit$cluster),FUN=mean)
+# append cluster assignment
+parcel <- data.frame(parcel, fit$cluster) 
+parcel<-subset(parcel,supcons<20000 &antiguedad>1700 & suppar<15000)
+plot(parcel$cx, parcel$cy , col=parcel$fit.cluster)
+
+# Model Based Clustering
+library(mclust)
+fit <- Mclust(parcel)
+plot(fit) # plot results
+summary(fit) # display the best model 
+
+# K-Means Clustering with 5 clusters
+fit <- kmeans(parcel, 5)
+
+# Cluster Plot against 1st 2 principal components
+
+# vary parameters for most readable graph
+library(cluster)
+clusplot(parcel, fit$cluster, color=TRUE, shade=TRUE,
+   labels=2, lines=0)
+
+# Centroid Plot against 1st 2 discriminant functions
+library(fpc)
+plotcluster(parcel, fit$cluster) 
+```
+
+## OPERACIONES CON SP_ EN SERVIDOR
+
+```{r}
+library(RPostgreSQL)
+con <- dbConnect(PostgreSQL(), host="comundata.com", user= "postgres", password="pasipasi", dbname="opendata")
+
+dbListTables(con)
+dbListFields(con, "PARCELA")
+
+#coordenadas<-paste0(41.143044," ", 1.402272)       #ERROR Trabajamos con utm
+coordenadas<-paste0(365915.741," ",4555865.707)
+
+punto=paste0("POINT(",coordenadas,")")
+punto=paste0("'",punto,"'")
+
+test=paste0('SELECT "REFCAT",ST_AsText(the_geom) AS geo FROM public."PARCELA" WHERE ST_Distance("PARCELA".the_geom,ST_GeomFromText(\'POINT(',coordenadas,')\')) <100.00;')
+
+test=paste0('SELECT "REFCAT",ST_AsEWKT(the_geom) AS geo FROM public."PARCELA" WHERE ST_Distance("PARCELA".the_geom,ST_GeomFromText(\'POINT(',coordenadas,')\')) <100.00;')
+
+#library(sp)
+#library(maptools)
+library(rgeos)
+#library(rgdal)
+#poli=readOGR(parcela,parcela$geo,require_geomType="wkbPolygon")
+
+parcela <- dbGetQuery(con, test)
+str(parcela)
+j=length(parcela$geo)
+k=1
+otro=c()
+while(k<=j) {
+  poli=readWKT(parcela$geo[k])
+  otro=c(otro,poli)
+  k=k+1
+}
+
+
+str(poli)
+plot(poli)
+slotNames(poli)
+
+dbDisconnect(con)
+```
+
+## FUNCION DE DEFINICION DE POLIGONOS
+### CREA LISTA DE COORDENADAS DE POLIGONOS PARA OPERAR CON LA LIBRERIA sp
+
+```{r}
+coordena<-function(polis){
+        poli<-gsub("[POLYGON()]","",polis)
+}
+lista<-coordena(parcela$geo)
+
+```
+
+## LEE POSTGRES A OTRO FORMATO ### muy interesante
+### Lee en el servidor con un query y carga elementos en formato rgeos
+
+```{r}
+library(RPostgreSQL)
+library(maptools)
+library(PBSmapping)
+library(shapefiles)
+library(rgdal)
+library(rgeos)
+library(sp)
+con <- dbConnect(PostgreSQL(), host="comundata.com", user= "postgres", password="pasipasi", dbname="opendata")
+test=paste0('SELECT "PARCELA".*, ST_AsText(the_geom) AS geo FROM public."PARCELA"
+WHERE cast(substring("PARCELA"."REFCAT" FROM 1 FOR 5) AS integer)>= 60618
+AND cast(substring("PARCELA"."REFCAT" FROM 1 FOR 5) AS integer)< 60619
+ORDER BY "PARCELA"."PARCELA";')
+testcons=paste0('SELECT constru.*, ST_AsText(the_geom) AS geo FROM public.constru
+WHERE cast(substring(constru.refcat FROM 1 FOR 5) AS integer)>= 60618
+AND cast(substring(constru.refcat FROM 1 FOR 5) AS integer)< 60619
+ORDER BY constru.parcela;')
+head(test)
+head(testcons)
+
+
+dbListTables(con)
+dbListFields(con, "constru")
+###############
+# ESTO FUNCIONA
+###############
+dfTemp = dbGetQuery(con, test)
+row.names(dfTemp) = dfTemp$gid
+ 
+# Create spatial polygons
+# To set the PROJ4 string, enter the EPSG SRID and uncomment the 
+# following two lines:
+# EPSG = make_EPSG()
+# p4s = EPSG[which(EPSG$code == SRID), "prj4"]
+for (i in seq(nrow(dfTemp))) {
+  if (i == 1) {
+    spTemp = readWKT(dfTemp$geo[i],dfTemp$gid[i])
+    origen=readWKT(dfTemp$geo[i],dfTemp$gid[i]) ### Eliminar
+    dato=dfTemp$gid[i] ### Eliminar
+    print(i)
+    # If the PROJ4 string has been set, use the following instead
+    # spTemp = readWKT(dfTemp$wkt_geometry[i], dfTemp$gid[i], p4s)
+  }
+  else {
+    spTemp = rbind(
+      spTemp, readWKT(dfTemp$geo[i],dfTemp$gid[i])
+      # If the PROJ4 string has been set, use the following instead
+      # spTemp, readWKT(dfTemp$wkt_geometry[i], dfTemp$gid[i], p4s)
+    )
+  }
+}
+ 
+# Create SpatialPolygonsDataFrame, drop WKT field from attributes
+spdfFinal = SpatialPolygonsDataFrame(spTemp, dfTemp[-2])
+plot(spdfFinal)
+####################
+dfTemp[dfTemp$gid==dato]
+
+origen=SpatialPolygons(origen)
+str(dfTemp)
+str(dfTemp[[1]][1])
+plot(spdfFinal, col="blue")
+plot(origen, col="red", add=TRUE)
+names(spdfFinal@polygons)
+############
+```
+
+## LEE POSTGRES (experimental)
+
+```{r}
+library(dplyr)
+# To connect to a database first create a src:
+my_db <- src_postgres(dbname = "opendata", host = "comundata.com", user = "postgres", password = "pasipasi")
+src_tbls(my_db)
+# Then reference a tbl within that src
+my_tbl <- tbl(my_db, "construparcel")
+head(my_tbl)
+summarize(my_tbl, A=mean(area))
+my_data<- tbl(my_db, sql('SELECT area FROM construparcel WHERE area> 2000.00'))
+head(my_data)
+summarize(my_data, A=mean(area))
+```
+
+
+## ACCESO con OGR
+
+```{r}
+ogrDrivers()
+getGDALDriverNames()
+library(RPostgreSQL) 
+drv <- dbDriver("PostgreSQL") 
+dsn="PG:host='comundata.com' dbname='opendata' user='postgres' password='pasipasi'" # Schemas=public"
+ogrListLayers(dsn)
+
+# EN LOCAL
+library(rgeos)
+
+dsn='C:/DADES/DadesObertes/TORREDEMBARRA/43_155_UA_2015-01-24_SHF/MASA'
+ogrListLayers(dsn)
+polys = readOGR(dsn,"MASA")
+polys@polygons[1]
+sale<-SpatialPolygons(polys@polygons[1])
+str(sale[1])
+plot(Polygons(sale@Polygons,1))
+plot(polys@polygons[1])
+
+ambit=gBuffer(polys[1], width=80)
+plot(ambit, add=TRUE)
+
+### OTRO SISTEMA
+
+
+writeOGR(parcela,"C:/Users/Antonio/Google Drive/INFORMACION", "salida", driver="ESRI Shapefile")
+plot(parcela)
+```
+
+## Crea nuevas tablas de cargos y las graba en el servidor
+### Relaciona las 4 tablas
+Extrae el numero de manzana de la referencia catastral de la parcela
+No junta los cargos C OM UN
+```{r}
+parcelas=dbGetQuery(con, "SELECT cat11.parcat, 
+  cat11.suppar, cat11.supcons, cat11.supsobre, substring(cat11.parcat from 1 for 5) AS masa, 
+  cat13.unicons,   
+  cat14.superficie, cat14.tipologia, cat14.antiguedad, cat14.cargo, cat14.unicons AS unicons14,  
+  cat14.bl, cat14.es, cat14.pl, cat14.pu, cat14.destino,
+  cat15.cargo As cargo15
+FROM 
+  public.cat11, 
+  public.cat14, 
+  public.cat13, 
+  public.cat15
+WHERE 
+  cat11.parcat = cat13.parcat AND
+  cat14.cargo = CAST (cat15.cargo AS TEXT) AND
+  cat14.parcat = cat15.parcat AND
+  cat13.parcat = cat14.parcat AND
+  cat13.unicons = cat14.unicons")
+
+#Crea registros de viviendas y los graba como tabla en el servidor
+if(dbExistsTable(con, "cargostorre")) dbRemoveTable(con, "cargostorre")
+dbWriteTable(con, "cargostorre", parcelas)
+# Close PostgreSQL connection 
+dbDisconnect(con)
+```
+
+## Analisis de los cargos del municipio
+```{r}
+# Conexion a a servidor
+library(RPostgreSQL)
+con <- dbConnect(PostgreSQL(), host="comundata.com", user= "postgres", password="pasipasi", dbname="opendata")
+
+cargos=dbGetQuery(con, "SELECT * FROM cargos_43_155")
+head(cargos)
+
+# Lectura de fichero de destinos
+perl <- "C:/perl/bin/perl5.20.2.exe"
+library(gdata)
+destinos<-read.xls("C:/DADES/POUMTORRE_2/informacio/CADASTRE/codigos.xls",sheet="destino",perl = perl,stringsAsFactors =FALSE)
+destinos$destino=destinos$clave
+str(destinos)
+# Agregacion por destinos
+a<-summarize(group_by(cargos,destino),anti=as.integer(mean(antiguedad)))
+b<-count(cargos,destino)
+a$cantidad<-b$n
+a$destino=sub(" +$","",a$destino)
+str(a)
+a<-as.data.frame(a)
+junta=merge(a,destinos )
+print(junta)
+head(junta)
+
+datos=cargos
+str(datos)
+suma<-summarise(group_by(datos,masa), 
+                plmax=max(as.numeric(pl), na.rm=TRUE),
+                anti=as.integer(mean(antiguedad)), 
+                superficie=sum(superficie), 
+                m =mean(superficie), 
+                ud=superficie/m,
+                sup=mean(suppar),
+                x=mean(as.double(cx)/100), 
+                y=mean(as.double(cy)/100), 
+                edif=(superficie/sup))
+tail(suma)
+library(ggplot2)
+ggplot(suma,aes(x,y, col=edif))+geom_point()
+
+
+# Close PostgreSQL connection 
+dbDisconnect(con)
+```
+
+Crea un fichero "union" juntando por parcela catastral (parcat) campos de los ficheros de parcela y de unidad catastral (finca)
+Se seleccionan los siguientes campos:
+
+
+1.  De parcela:
++  parcat:       Parcela catastral
++  cx, cy:       Coordenadas x,y
++  suppar:       Superficie de parcela
++  supcons:      Superficie construida total
++  supsobre;     Superficie construida sobre rasante
++  supbajo:      Superficie construida en sotanos
++  supcubierta:  Ocupacion (Proyeccion del edificio)
+
+
+2.  De cada unidad construida (finca)
++  parcat:       Parcela catastral
++  pl:           Planta
++  pu:           Puerta
++  destino:      Destino (uso)
++  antiguedad:   Antiguedad
++  superficie:   Superficie construida de la finca
++  supext:       Superfice exterior (terrazas)
++  supotras:     Superficie otras situaciones
++  tipologia:    Tipologia segun catalogo catastral
+
+
+Para cada parcela se realizan las siguientes operaciones:  
+Para cada uso:
+
+        Se suman las superficies
+        Se obtiene la superficie media
+        Se cuentas el numero de unidades
+        Se obtiene la antiguedad media
+        
+## ACtuaciones varias
+```{r}
+union11<-cat11 %>% select(parcat,cx,cy,suppar:supcubierta)
+str(union11)
+union14<-cat14 %>% select(parcat,pl:destino,antiguedad, superficie:tipologia)
+# union 14$edad<-aggregate(union14$antiguedad, list(parcela=union14$parcat),FUN=mean)
+union14$destino[is.na(union14$destino)] <- "   "
+union<-left_join(union11,union14, by="parcat")
+# union<-union11 %>% left_join(union14, by="parcat") 
+union$superficie[is.na(union$superficie)] <- 0
+str(union)
+union$clave<-paste0(union$parcat,substr(union[,"destino"],1,1))
+union$destino<-substr(union[,"destino"],1,1)
+```
+
+```{r, warning=FALSE}
+union$pl<-as.numeric(union$pl)
+suma<-summarise(group_by(union,clave), plantas=max(pl, na.rm=TRUE),anti=mean(antiguedad), m = mean(superficie), t =sum(superficie), ud=t/m) #BIEN#
+# parcelas<-summarise(group_by(union,parcat),plantas=as.integer(max(pl, na.rm=TRUE)),anti=mean(antiguedad))
+# parcel<-data.frame(parcelas)
+este<-data.frame(suma)
+este$plantas=este$plantas+1
+este$plantas[is.na(este$plantas)]<-0
+```
+
+Extrae todos los destinos codificados en este municipio.
+
+```{r}
+# Destinos existentes en Torredembarra
+n<-table(substr(union[,"destino"],1,1)) # Codifica por primera letra de usos
+write.table(n,"destino2.csv",col.names=FALSE)
+# Lee destinos de Torredembarra
+desti<-read.table("destino2.csv",header=FALSE, col.names=c("id","desti","num"))
+str(desti)
+```
+
+Anade campos de clave de destino en parcelas
+
+```{r}
+# Anade campos de clave de destino en parcelas11 
+nombres=names(union11)
+# ("A": Aparcamiento-Trastero,"V": Vivienda,"C":Comercial,"I":Industrial)
+elige<-c("A","V","C","I")
+for (n in elige){
+        m=paste0("n",n)
+        union11[n]<-0        
+        union11[m]<-0
+        #         SUPERFICIES
+        nombres<-c(nombres,n)
+        #         UNIDADES
+        nombres<-c(nombres,m)
+}
+names(union11)<-nombres
+union11$alto<-0
+```
+
+Para cada parcela:  
+Llena el valor de cada uso con sus datos acumulados:
+        "uso"= numero de metros cuadrados de este uso
+        n"uso"= numero de unidades de este uso
+        
+Usos relevantes para cada parcela:
+
+        A:      Superficie total de uso aparcamiento o trastero
+        V:      Superficie total de uso Vivienda
+        C:      Superficie total de uso comercial
+        I:      Superficie total de uso Industrial
+        
+        nA:     Numero de aparcamientos i trasteros
+        nV:     Numero de viviendas
+        nC:     Numero de locales comerciales
+        nI:     Numero de industrias
+        
+```{r}
+tot<-aggregate(este$t, list(paruso= este$clave), sum) # Suma superficies por parcela y uso
+totales<-data.frame(tot)
+totales$t<-totales$x # Pone el total en el campo t y borra el campo x
+totales$x<-NULL
+unidades<-aggregate(este$ud, list(paruso= este$clave), sum)
+# Promedio de antiguedades de los usos en parcela
+antiguo<-aggregate(este$anti, list(paruso= este$clave), mean)
+
+altura<-aggregate(as.integer(este$plantas,na.rm=TRUE), list(paruso= este$clave), max)
+
+totales$parcat<-substr(totales$paruso,1,14)
+totales$ud<-unidades$x
+totales$antiguedad<-antiguo$x
+totales$uso<-substr(totales[,"paruso"],15,15)
+totales$alto<-altura$x
+
+union11$edificado<-0 # Identifica la parcela como edificada
+edad<-summarise(group_by(totales,parcat), mean(antiguedad),max(alto))
+edades<-data.frame(edad)
+edades$edad<-as.integer(edades$mean.antiguedad)
+edades$alto<-edades$max.alto
+k=1
+while(k<=nrow(totales)){
+        parcela<-totales[k,"parcat"]
+        uso<-totales[k,"uso"]
+        nuso<-paste0("n",uso)
+        nud<-totales[k,"ud"]
+        
+        if(totales[k,"t"]>0) union11[union11$parcat==parcela, "edificado"]=1
+        
+        union11[union11$parcat==parcela,uso]=totales[k,"t"]
+        union11[union11$parcat==parcela,nuso]=totales[k,"ud"]
+        union11[union11$parcat==parcela,"anti"]=edades[edades$parcat==parcela,"edad"]
+        union11[union11$parcat==parcela,"alto"]=edades[edades$parcat==parcela,"alto"]
+        k=k+1
+}
+
+union11$cx=as.numeric(union11$cx) #coordenadas reales con dos decimales (X100)
+union11$cy=as.numeric(union11$cy)
+# Para estadisticas suprimir na="0"
+write.csv2(union11,paste0(muni,"resultadoSimple.csv"),row.names=FALSE, quote=FALSE, na="0")
+```
+
+Se han guardado los datos creados en union11 en el fichero "resultadoSimple.csv" con la siguiente estructura:
+```{r}
+str(union11)
+```
+
+Este fichero, "resultadoSimple.csv" es importable directamente a CartoDB como tabla.
+Si se vincula al plano parcelario "PARCELA.SHP" se puede generar como mapa
+
+Tarragona a 09 de diciembre de 2015

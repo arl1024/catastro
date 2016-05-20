@@ -1,0 +1,71 @@
+---
+title: "Volumen Planeamiento"
+author: "Antonio Ripoll"
+date: "Friday, December 04, 2015"
+output: html_document
+---
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+Directorio de trabajo y librerias:
+
+```{r}
+setwd("C:/DADES/POUMTORRE_2/cartografia/cadastre")
+setwd("E:/TORREDEMBARRA")
+library(rgdal)
+library(maptools)
+library(gridExtra)
+library("dplyr")
+```
+
+##Lee los ficheros .SHP y graba quitando pavimentos.
+```{r}
+construc<-readShapeSpatial("./43_155_UA_2015-09-25_SHF/CONSTRU/CONSTRU")
+edi<-subset(construc,construc@data$CONSTRU!="P" & construc@data$CONSTRU!="SUELO" & construc@data$CONSTRU!="PAV")
+writePolyShape(b.df,"./43_155_UA_2015-09-25_SHF/CONSTRU/OCUPA" )
+```
+
+##Lee los ficheros .SHP quita pavimentos y agrupa por REFCAT
+```{r}
+construc<-readShapeSpatial("./43_155_UA_2015-09-25_SHF/CONSTRU/CONSTRU")
+
+#Genera las construcciones edificadas.
+edi<-subset(construc,construc@data$CONSTRU!="P" & construc@data$CONSTRU!="SUELO" & construc@data$CONSTRU!="PAV")
+b.df<-as.data.frame(edi)
+
+edi@data$id<-edi@data$REFCAT
+b<-unionSpatialPolygons(edi,edi$REFCAT)
+b.df.union <- b.df %>% group_by(REFCAT) %>% summarise(areacons=sum(AREA))
+b.df.union<-as.data.frame(b.df.union)
+
+row.names(b.df.union)<-b.df.union$REFCAT
+c<-SpatialPolygonsDataFrame(b, b.df.union)
+
+writePolyShape(c,"./43_155_UA_2015-09-25_SHF/CONSTRU/OCUPAb")
+```
+
+##Lo mismo con rgdal
+```{r}
+construc<-readOGR(dsn = "./43_155_UA_2015-09-25_SHF/CONSTRU", layer = "CONSTRU",stringsAsFactors=FALSE)
+construc.df <- as(construc, "data.frame")
+
+# Opera con el dataframe
+b.df<-construc.df %>% group_by(REFCAT) %>% summarise(area=sum(AREA))
+b.df<-as.data.frame(b.df)
+
+# Genera ids para agrupacion
+row.names(b.df)<-b.df$REFCAT
+construc@data$id<-construc@data$REFCAT
+
+# Opera con las geometrias
+construc.union <- unionSpatialPolygons(construc, construc$REFCAT)
+construc.shape<- SpatialPolygonsDataFrame(construc.union, b.df)
+
+## https://gist.github.com/mbacou/5880859
+#slotNames(construc.union)
+#slotNames(construc.union@polygons[[1]])
+
+writeOGR(construc.shape , dsn = "./43_155_UA_2015-09-25_SHF/CONSTRU", layer = "OCUPA2",driver="ESRI Shapefile")
+```
+
+

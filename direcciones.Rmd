@@ -1,0 +1,67 @@
+---
+title: "Tabla de direcciones catastrales"
+author: "urbanisme"
+date: "Monday, April 18, 2016"
+output: html_document
+---
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+## Carga de librerias
+Es necesario cargar las librerias `reshape` i `dplyr` de <https://cran.r-project.org/web/packages/dplyr/>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Directorio de trabajo
+setwd("C:/Users/Antonio/Google Drive/INFORMACION")
+setwd("C:/DADES/DadesObertes/TORREDEMBARRA/2016/43_155_U_2016-01-22.CAT")
+#Librerias
+library(rmarkdown)
+library(reshape)
+library(dplyr)
+library(RPostgreSQL)
+library(sp)
+library(maptools)
+library(rgeos)
+```
+
+## Lectura de fichero 11
+
+```{r}
+fichero="43_155_registros11.csv"
+cat11<-read.csv(fichero, stringsAsFactors=FALSE)
+str(cat11)
+cat11$via=gsub("(+ +)","",cat11$via)
+cat11$nomcalle=gsub("^\\s+|\\s+$", "",cat11$nomcalle)
+direcciones=c()
+referencias=c()
+for(n in cat11){
+        # print(cat11[,"X"])
+        if (cat11[,"num2"]<=cat11[,"num1"]){
+                dir=paste(cat11[,"via"],cat11[,"nomcalle"],as.character(cat11[,"num1"]))
+                direcciones=c(direcciones,dir)
+                referencias=c(referencias,cat11[,"parcat"])
+        }
+        else {
+                nummin=cat11[,"num1"]
+                nummax=cat11[,"num2"]
+#                 dir=paste(cat11[,"via"],cat11[,"nomcalle"],as.character(cat11[,"num1"]))
+#                 direcciones=c(direcciones,dir)
+#                 referencias=c(referencias,cat11[,"parcat"])
+                while(nummin<=nummax){
+                        dir=paste(cat11[,"via"],cat11[,"nomcalle"],as.character(nummin))
+                        direcciones=c(direcciones,dir)
+                        referencias=c(referencias,cat11[,"parcat"])
+                        nummin=nummin+2
+                }
+        }
+}
+
+direc<-as.data.frame(direcciones, stringsAsFactors=FALSE)
+refer<-as.data.frame(referencias, stringsAsFactors=FALSE)
+str(direc)
+str(refer)
+direc$referencias<-refer$referencias
+direcciones<-direc[!duplicated(direc), ]
+str(direcciones)
+orden.direc<-sort_df( direcciones)
+write.csv2(orden.direc,"direccionesCAT.csv")
+```

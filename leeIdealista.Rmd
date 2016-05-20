@@ -1,0 +1,70 @@
+---
+title: "Idealista"
+author: "Antonio Ripoll"
+date: "22 de enero de 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+
+```{r}
+library(RJSONIO)
+lista<-fromJSON(readLines('http://idealista-prod.apigee.net/public/2/search?apikey=MowpyNdiS0ZI7HSk2WCHctAeKNfp2Xpn&country=es&maxItems=10&numPage=1&distance=452&center=41.143422,1.401513&propertyType=homes&operation=V')[1])
+
+lista=readLines('http://idealista-prod.apigee.net/public/2/search?apikey=MowpyNdiS0ZI7HSk2WCHctAeKNfp2Xpn&country=es&maxItems=10&numPage=1&distance=421&center=41.119063,1.245483&propertyType=homes&operation=V')
+```
+
+Formato de lectura de datos de Idealista
+Centro en plaza Imperial Tarraco i radio 300 metros
+#### con<-'http://idealista-prod.apigee.net/public/2/search?apikey=MowpyNdiS0ZI7HSk2WCHctAeKNfp2Xpn&country=es&maxItems=10&numPage=1&distance=300&center=41.119063,1.245483&propertyType=homes&operation=V'
+
+Centro en L'Antina Torredembarra i radio 2500 metros
+#### con<-'http://idealista-prod.apigee.net/public/2/search?action=json&apikey=MowpyNdiS0ZI7HSk2WCHctAeKNfp2Xpn&country=es&maxItems=50&numPage=11&distance=2500&center=41.147054,1.412850&propertyType=homes&operation=V'
+
+Carga de datos a dataframe
+```{r}
+setwd("C:/DadesObertes/IDEALISTA")
+setwd("C:/Users/Antonio/Google Drive/poum/informacio/idealista")
+library(jsonlite)
+paginas<-list()
+for (n in 1:11) {
+        con<-paste0('http://idealista-prod.apigee.net/public/2/search?action=json&apikey=MowpyNdiS0ZI7HSk2WCHctAeKNfp2Xpn&country=es&maxItems=50&numPage=',as.character(n),'&distance=2500&center=41.147054,1.412850&propertyType=homes&operation=V')
+        message("buscando pagina: ",n)
+        lista<-fromJSON(con)
+        paginas[[n]]<-lista
+}
+
+todas<-as.data.frame(paginas[[1]][2][[1]])
+for (n in 2:11) {
+        todas<-rbind(todas,paginas[[n]][2][[1]])
+}
+nomfich<-paste0("idealista_",format(Sys.time(),"%d%m%Y"),".csv")
+write.csv(todas,nomfich)
+```
+
+Explotacion de datos
+```{r}
+str(todas)
+names(paginas[[1]][2][[1]])
+paginas[[1]][2][[1]]
+
+table(todas$municipality)
+table((todas$rooms))
+mean(todas$size)
+mean(todas$price)/mean(todas$size)
+mean(todas$price/todas$size)
+
+library(ggplot2)
+ggplot(todas, aes(price,size))+geom_point()+geom_smooth()+facet_grid(.~rooms)+xlim(0,500000)+ylim(0,300)
+ggplot(todas, aes(price,size))+geom_point()+geom_smooth()+facet_grid(.~propertyType)+xlim(0,500000)+ylim(0,300)
+ggplot(todas, aes(price,size))+geom_point()+geom_smooth()+facet_grid(rooms~propertyType)+xlim(0,500000)+ylim(0,300)
+
+```
+

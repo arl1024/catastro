@@ -1,0 +1,43 @@
+---
+title: "DIRECCIONES PADRON"
+author: "Antonio Ripoll"
+date: "7 de marzo de 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+
+
+```{r}
+# Mira en que ordenador trabaja y elige directorio
+library(stringr)
+donde=Sys.info()["nodename"] 
+if(donde['nodename']=="ANTONIOHP") setwd("C:/DadesObertes/POUMTORRE_2/Programes") else setwd("C:/DADES/POUMTORRE_2/Programes")
+
+file15=read.csv2("C:/DadesObertes/TORREDEMBARRA/43_155_registros15.csv", sep=",", stringsAsFactors = FALSE)
+file15$pl=sub("0","",file15$pl)
+file15$pu=sub("0","",file15$pu)
+file15$bl=str_replace(file15$bl, "    ", "0")
+file15$es=str_replace(file15$es, "  ", "0")
+file15$pl=str_replace(file15$pl, "   ", "0")
+file15$pu=str_replace(file15$pu, "   ", "0")
+
+file15$direccion<-paste(str_trim(file15$nomcalle),file15$num1,str_trim(file15$bl), str_trim(file15$es), 
+                 str_trim(file15$pl),str_trim(file15$pu), sep=",")
+str(file15)
+head(file15$direccion)
+
+tabla1=as.data.frame(file15$parcat,stringsAsFactors =FALSE)
+tabla1$direccion=file15$direccion
+str(tabla1)
+write.csv2(tabla1,"tablaDirecciones.csv")
+```
+
+

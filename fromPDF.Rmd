@@ -1,0 +1,28 @@
+---
+title: "Scraping PDF"
+author: "urbanisme"
+date: "Wednesday, March 02, 2016"
+output: html_document
+---
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+```{r}
+library(pdftools)
+# download.file("http://arxiv.org/pdf/1403.2805.pdf", "1403.2805.pdf", mode = "wb")
+setwd("C:/DADES/POUMTORRE_2/Programes")
+
+info <- pdf_info("000160.pdf")
+text <- pdf_text("000160.pdf")
+fonts <- pdf_fonts("000160.pdf")
+files <- pdf_attachments("000160.pdf")
+toc <- pdf_toc("000160.pdf")
+info
+text
+fonts
+files
+text2<-strsplit(text,"\r\n", fixed = TRUE)
+text3<-data.frame(t(data.frame(text2)), stringsAsFactors =FALSE)
+str(text3)
+write.csv(text3,"depdf3.csv")
+```

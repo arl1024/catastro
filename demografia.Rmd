@@ -1,0 +1,353 @@
+---
+title: "DEMOGRAFIA"
+author: "urbanisme"
+date: "Thursday, March 03, 2016"
+output: html_document
+---
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+## Libreria y directorio de trabajo
+No es adequado porque mantiene "NA"
+
+```{r, echo=FALSE,warning=FALSE}
+library(readxl)
+library(dplyr)
+# Mira en que ordenador trabaja y elige directorio
+donde=Sys.info()["nodename"] 
+if(donde['nodename']=="ANTONIOHP") setwd("C:/DadesObertes/POUMTORRE_2/Programes") else setwd("C:/DADES/POUMTORRE_2/Programes")
+```
+
+## Carga de datos desde excel y guarda en  .csv
+
+```{r,echo=FALSE,warning=FALSE}
+# Lee fichero .XLS
+poble<-read_excel("POUM.xls", na="*")
+#str(poble)
+
+write.csv2(poble,"padro.csv",fileEncoding="LATIN1")
+```
+
+## Carga de datos .CSV
+
+```{r, echo=FALSE,warning=FALSE}
+anticwd<-getwd()
+setwd("../DADES_PG/poblacio") # Fichero ya creado
+poble<-read.csv2("padro.csv", encoding = "LATIN1",na.strings = c("NA",""),
+                 stringsAsFactors =FALSE)
+# Substituye todos los valores NA con 0
+#str(poble)
+for(i in seq(length(poble))) {
+  poble[i]<-replace(poble[i], is.na(poble[i]), "0")
+}
+#table(poble$Pl)
+#head(poble,20)
+
+# Carga de edad referida a una fecha
+fecha = "01-03-2016"
+edad=difftime(strptime(fecha, format = "%d-%m-%Y"),
+strptime(poble$Fecha_nace, format = "%Y-%m-%d"),units="days")
+anos<-as.integer(edad/365.25)
+poble$edad=anos
+hist(poble$edad, col="lightblue")
+abline(v=mean(poble$edad, na.rm=TRUE),col="red",lwd=3)
+
+#Crea grupos anuales
+grupo <- summarize(group_by(poble,edad), s=sum(edad),m=mean(edad),habit=s/m)
+points(grupo$habit, add=TRUE)
+grupo$s<-NULL
+grupo
+write.csv2(grupo,"grupo_anuales.csv")
+```
+
+## Codificacion de origen
+
+```{r, warning=FALSE}
+# Mira datos
+table(poble$Prov_nace=="PAISES" & poble$Muni_nace=="FRANCIA")
+table(poble$Prov_nace=="TARRAGONA")
+table(poble$Muni_nace=="TORREDEMBARRA")
+
+# Piramide de poblacion quinquenal por sexo
+pira=c()
+for (i in seq(from=0 ,to=100, by=5)) {
+  minim=i
+  maxim=i+5
+  num_d=subset(poble,edad>=minim & edad<maxim & Sexo=="Dona")
+  num_h=subset(poble,edad>=minim & edad<maxim & Sexo=="Home")
+  linea=c(minim,maxim,nrow(num_d),nrow(num_h))
+  pira=rbind(pira, linea)
+}
+piramide=as.data.frame(pira,row.names=as.integer(seq(from=0 ,to=100, by=5)))
+names(piramide)<-c("minim","maxim","dones","homes")
+piramide
+write.csv2(piramide,"piramide.csv")
+plot(piramide$min,piramide$dones, col="red")
+lines(piramide$min,piramide$homes, col="blue")
+
+# Determinacion de colectivos
+estranjeros=subset(poble,Prov_nace=="PAISES")
+str(estranjeros)
+hispanos=subset(poble,Prov_nace!="PAISES")
+str(hispanos)
+
+# Para los estranjeros determina numero y edad media
+porpais=summarise(group_by(estranjeros, Muni_nace), t=sum(edad), edadmedia=mean(edad),numero=t/edadmedia)
+porpais$t<-NULL
+porpais$edadmedia<-as.integer(porpais$edadmedia)
+porpais<-arrange(porpais, desc(numero))
+write.csv2(as.data.frame(porpais),"porpais.csv")
+print(porpais)
+
+porprovincia=summarise(group_by(hispanos, Prov_nace), t=sum(edad), edadmedia=mean(edad),numero=t/edadmedia)
+porprovincia$t<-NULL
+porprovincia$edadmedia<-as.integer(porprovincia$edadmedia)
+porprovincia<-arrange(porprovincia, desc(numero))
+write.csv2(as.data.frame(porprovincia),"porprovincia.csv")
+print(porprovincia)
+
+# Revisar
+###################
+# catalunya=c("TARRAGONA","BARCELONA","LLEIDA","GIRONA")
+# ccaa=subset(hispanos,Prov_nace==catalunya )
+# 
+# table(hispanos$Prov_nace==catalunya )
+# table(poble$Prov_nace==catalunya )
+# str(ccaa)
+##################
+
+```
+
+## Codificacion de direcciones 
+Codificacion de Calle+Numero+Bloque+Escalera+Planta+Puerta
+CORREGIR PLANTA EN CASO DE CARACTER "BAJOS"
+
+```{r, echo=FALSE,warning=FALSE}
+# Conversiones de tipo
+poble$Esc=gsub("\\.000000","",poble$Esc)
+poble$Pl=gsub("\\.000000","",poble$Pl)
+poble$Pu=gsub("\\.000000","",poble$Pu)
+
+poble$dirStruc=paste(poble$Nom_via,as.character(poble$Num_inf),
+                poble$Bloque,poble$Esc,poble$Pl,poble$Pu, sep=",") # "LLEIDA (DE),13,0,0,1,C" 
+
+poble$dirStruc=gsub( " *\\(.*?\\) *", "",poble$dirStruc)
+
+#head(poble)
+numdirec=unique(poble$dirStruc)
+write.csv2(numdirec,"direcPadro.csv")
+write.csv2(poble,"poblacion.csv")
+```
+
+## Codificacion de direcciones 
+Codificacion de Calle+Numero
+
+```{r, echo=FALSE,warning=FALSE}
+# Conversiones de tipo
+poble$Esc=gsub("\\.000000","",poble$Esc)
+poble$Pl=gsub("\\.000000","",poble$Pl)
+poble$Pu=gsub("\\.000000","",poble$Pu)
+
+poble$dirStruc=paste(poble$Nom_via,as.character(poble$Num_inf), sep=" ") 
+# "LLEIDA (DE) 13" 
+
+poble$dirStruc=gsub( " *\\(.*?\\) *", "",poble$dirStruc)
+head(poble$dirStruc)
+#head(poble)
+numdirec=unique(poble$dirStruc)
+cuenta=as.data.frame(table(poble$dirStruc))
+str(cuenta)
+names(cuenta)<-c("direccion","personas")
+write.csv2(numdirec,"direcPadro_CR_NUM.csv")
+write.csv2(poble,"poblacion_CR_NUM.csv")
+
+```
+
+## Lectura de direcciones de catastro Reg15
+Codificacion de Calle+Numero+Bloque+Escalera+Planta+Puerta
+```{r}
+library(stringr)
+oldwd=getwd()
+setwd("C:/DADES/DadesObertes/TORREDEMBARRA/2016/43_155_U_2016-01-22.CAT")
+catas<-read.csv("43_155_registros15.csv", stringsAsFactors =FALSE)
+str(catas)
+catas$es[catas$es=="  "]="0"
+catas$bl[catas$bl=="    "]="0"
+catas$direccion<-paste(catas$nomcalle,catas$num1,catas$bl,catas$es,sub("^0","",catas$pl),sub("^0","",catas$pu))
+gsub("\\s+", ",", catas$direccion)
+table(catas$pl)
+
+setwd(oldwd)
+```
+
+## Lectura de direcciones de catastro Reg15
+Codificacion de Calle+Numero
+
+```{r}
+library(stringr)
+oldwd=getwd()
+setwd("C:/DADES/DadesObertes/TORREDEMBARRA/2016/43_155_U_2016-01-22.CAT")
+catas<-read.csv("43_155_registros15.csv", stringsAsFactors =FALSE)
+str(catas)
+catas$es[catas$es=="  "]="0"
+catas$bl[catas$bl=="    "]="0"
+catas$direccion<-paste(sub("\\s+$", "",catas$nomcalle),catas$num1)
+dircatas<-as.data.frame(catas[,c(1,7,20,23,32)])
+str(dircatas)
+
+
+dircatas$unic<-!duplicated(dircatas$direccion)
+str(dircatas$unic)
+dircat<-dircatas[dircatas$unic==TRUE,]
+dircat$unic=NULL
+str(dircat)
+
+write.csv(dircat,"tablaDirecciones_CR_NUM.csv")
+setwd(oldwd)
+```
+
+
+
+## Conexion entre poblacion.csv (fichero de padron) y tablaDirecciones.csv (fichero de catastro)
+CALLE+NUMERO+BLOQUE+ESCALERA+PLANTA+PUERTA
+
+```{r,echo=FALSE,warning=FALSE}
+padron<-read.csv2("poblacion_CR_NUM.csv", stringsAsFactors =FALSE)
+catastro<-read.csv2("tablaDirecciones_CR_NUM.csv", stringsAsFactors =FALSE)
+str(padron)
+str(catastro)
+junto=merge(padron,catastro,by.x="dirStruc", by.y="direccion", all.x=TRUE)
+str(junto)
+quan<-junto$dirStruc[is.na(junto$file15.parcat)]
+str(quan)
+unique(junto$dirStruc)
+unique(quan)
+```
+
+## Conexion entre poblacion.csv (fichero de padron) y tablaDirecciones.csv (fichero de catastro) 
+SOLO CALLE + NUMERO
+
+```{r,echo=FALSE,warning=FALSE}
+padron<-read.csv2("poblacion_CR_NUM.csv", stringsAsFactors =FALSE)
+catastro<-read.csv("tablaDirecciones_CR_NUM.csv", stringsAsFactors =FALSE)
+str(padron)
+str(catastro)
+junto=merge(padron,catastro,by.x="dirStruc", by.y="direccion")
+str(junto)
+quan<-junto$dirStruc[is.na(junto$file15.parcat)]
+str(quan)
+unique(junto$dirStruc)
+unique(quan)
+```
+
+
+```{r, echo=FALSE,warning=FALSE}
+# Explotacion
+direcciones=as.data.frame(table(padron$dirStruc))
+#str(direcciones)
+personas<-arrange(direcciones, desc(Freq))
+sale<-as.data.frame(table(personas$Freq))
+str(sale)
+plot(sale$Freq, xlim=c(1,6))
+```
+
+## Hogares con una persona mayor de 90 anys
+
+```{r,warning=FALSE}
+mayor90<-subset(poble,edad>90)
+str(mayor90)
+edades=arrange(mayor90,desc(edad))
+head(edades)
+```
+
+## Graficos
+
+```{r, warning=FALSE}
+library(ggplot2)
+home<-subset(poble,Sexo=="Home")
+hist(home$edad, breaks=20, col="lightblue")
+dona<-subset(poble,Sexo=="Dona")
+hist(dona$edad, breaks=20, col="red", alpha=0.5, add=TRUE)
+ggplot(home,aes(home$edad))+geom_histogram(binwidth=5, color="lightblue",fill="blue")
+
+estran<-as.data.frame(table(poble$Prov_nace=="PAISES"),stringsAsFactors=FALSE) # & poble$Muni_nace=="FRANCIA")
+str(estran)
+tarra<-as.data.frame(table(poble$Prov_nace=="TARRAGONA"),stringsAsFactors=FALSE)
+str(tarra)
+torre<-as.data.frame(table(poble$Muni_nace=="TORREDEMBARRA"),stringsAsFactors=FALSE)
+str(torre)
+
+ggplot(estran, aes(Freq))+geom_bar()
+```
+
+## Agrupaciones familiares
+
+```{r, echo=FALSE,warning=FALSE}
+library(dplyr)
+padron<-read.csv2("poblacion.csv", stringsAsFactors =FALSE)
+#str(padron)
+unico <- as.data.frame(padron %>% group_by(dirStruc))
+str(unico)
+
+# Agrupa por direcciones
+salida<-file("hab_direc.txt","w")
+for(direc in unico$dirStruc) {
+        uno=subset(padron, dirStruc==direc)
+        lista=c()
+        for(n in uno$edad){
+               lista=paste0(lista,"_",n)
+        }
+        lista=paste0(uno$dirStruc,lista)
+        writeLines(lista,salida)
+}
+flush(salida)
+close(salida)
+
+cuenta=read.csv2("salida1.txt", header=FALSE, stringsAsFactors=FALSE, fill=TRUE )
+#head(cuenta,50)
+
+# Numero total de habitantes por direcciones unicas
+llar=tapply(padron$edad, padron$dirStruc, length) # summary da datos de distribucion interior 
+write.csv2(llar,"composicio.csv",fileEncoding="LATIN1")
+
+########################
+# Max min mean num de habitantes
+tratar <- group_by(padron,dirStruc)
+unico <- summarise(tratar, media=mean(edad), suma=sum(edad),maximo=max(edad), minimo=min(edad), numero=suma/media)
+unico=as.data.frame(unico)
+write.csv2(unico,"salida2.csv",quote = FALSE)
+```
+
+### Resultados anteriores
+```{r}
+# Edad media
+mean(unico$media, na.rm=TRUE)
+median(unico$media, na.rm=TRUE)
+table(unico$numero<3)
+
+# Monoparentales y mayores de 80
+monopar=subset(unico,numero==1 & minimo>=80)
+str(monopar)
+```
+
+## Graficos de agrupacion
+
+```{r, echo=FALSE,warning=FALSE}
+plot(unico$media, unico$numero, ylim=c(0,10), col=unico$maximo)
+
+hist(unico$numero, breaks=60, xlim=c(1,10))
+abline(v=mean(unico$numero, na.rm=TRUE),col="red",lwd=3)
+abline(v=median(unico$numero, na.rm=TRUE),col="blue",lwd=3)
+plot(unico$numero, ylim=c(0,10))
+
+library(ggplot2)
+ggplot(unico, aes(numero, col="blue"))+geom_histogram(binwidth=1)+ xlim(1,10)
+
+plot(table(unico$numero),xlim=c(0,10))
+######################
+
+hogares<-aggregate(edad ~ dirStruc, padron, id)
+str(hogares)
+```
+
+
